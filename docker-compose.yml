@@ -1,0 +1,53 @@
+services:
+  maildev:
+    image: maildev/maildev:latest
+    container_name: stampee-maildev
+    ports:
+      - "1080:1080"
+      - "1025:1025"
+    environment:
+      - MAILDEV_INCOMING_USER=
+      - MAILDEV_INCOMING_PASS=
+    restart: unless-stopped
+
+  clamav:
+    platform: linux/x86_64
+    image: clamav/clamav:latest
+    container_name: stampee-clamav
+    ports:
+      - "3310:3310"
+    volumes:
+      - clamav-data:/var/lib/clamav
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "clamdscan", "--ping", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  backend:
+    build:
+      context: .
+      dockerfile: ./backend/Dockerfile
+    container_name: stampee-backend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - SMTP_HOST=maildev
+      - SMTP_PORT=1025
+      - CLAMAV_HOST=clamav
+      - CLAMAV_PORT=3310
+    volumes:
+      - ./backend:/app/backend
+      - /app/backend/node_modules
+      - /app/node_modules
+    depends_on:
+      - maildev
+      - clamav
+    command: pnpm dev
+    restart: unless-stopped
+
+volumes:
+  clamav-data:
