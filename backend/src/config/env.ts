@@ -26,6 +26,9 @@ export const envSchema = z.object({
     SMTP_HOST: z.string().default('maildev'),
     SMTP_PORT: z.coerce.number().default(1025),
 
+    CLAMAV_HOST: z.string().default('clamav'),
+    CLAMAV_PORT: z.coerce.number().default(3310),
+
     STORAGE_PATH: z.string().default(path.join(process.cwd(), 'uploads')),
     DOWNLOAD_TTL_HOURS: z.coerce.number().default(48),
     MAX_FILES_PER_MESSAGE: z.coerce.number().default(10),

@@ -120,6 +120,53 @@ describe('Messages e2e', () => {
         expect(downloadResponse.headers['content-type']).toContain('application/zip');
     });
 
+    it('adds attachments to an existing message', async () => {
+        const initialFile = path.join(storageDir, `base-${Date.now()}.txt`);
+        writeFileSync(initialFile, 'base content');
+
+        const createResponse = await request(app.getHttpServer())
+            .post('/api/messages')
+            .field('subject', 'Has attachments')
+            .field('body', 'Body')
+            .field('recipients', 'user@example.com')
+            .attach('attachments', initialFile);
+
+        expect(createResponse.status).toBe(201);
+        const messageId = createResponse.body.id as string;
+
+        const extraA = path.join(storageDir, `extra-a-${Date.now()}.txt`);
+        const extraB = path.join(storageDir, `extra-b-${Date.now() + 1}.txt`);
+        writeFileSync(extraA, 'extra a');
+        writeFileSync(extraB, 'extra b');
+
+        const addResponse = await request(app.getHttpServer())
+            .post(`/api/messages/${messageId}/attachments`)
+            .attach('attachments', extraA)
+            .attach('attachments', extraB);
+
+        expect(addResponse.status).toBe(201);
+        expect(addResponse.body).toHaveLength(3);
+        const names = addResponse.body.map((att: { name: string }) => att.name);
+        expect(names).toEqual(
+            expect.arrayContaining([
+                path.basename(initialFile),
+                path.basename(extraA),
+                path.basename(extraB),
+            ]),
+        );
+    });
+
+    it('returns 404 when adding attachments to a missing message', async () => {
+        const ghostFile = path.join(storageDir, `ghost-${Date.now()}.txt`);
+        writeFileSync(ghostFile, 'ghost payload');
+
+        const response = await request(app.getHttpServer())
+            .post('/api/messages/non-existent-id/attachments')
+            .attach('attachments', ghostFile);
+
+        expect(response.status).toBe(404);
+    });
+
     it('rejects invalid payload with 400', async () => {
         const invalidPayloads = [
             { subject: undefined, body: 'Body', recipients: 'user@example.com' },

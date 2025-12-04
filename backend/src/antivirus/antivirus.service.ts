@@ -2,20 +2,23 @@ import { Inject, Injectable, Logger, ServiceUnavailableException, BadRequestExce
 import { ConfigService } from '@nestjs/config';
 import * as clamav from 'clamav.js';
 import { Readable } from 'stream';
+import { EnvVars } from '../config/env.js';
 
 @Injectable()
 export class AntivirusService {
     private readonly logger = new Logger(AntivirusService.name);
 
-    constructor(@Inject(ConfigService) private readonly config: ConfigService) {
+    constructor(
+        @Inject(ConfigService) private readonly config: ConfigService<EnvVars, true>,
+    ) {
         if (!this.config) {
             throw new Error('ConfigService not available in AntivirusService');
         }
     }
 
     async scanBuffer(buffer: Buffer) {
-        const host = String(this.config.get('CLAMAV_HOST') ?? 'clamav');
-        const port = Number(this.config.get('CLAMAV_PORT') ?? 3310);
+        const host = this.config.get('CLAMAV_HOST', { infer: true });
+        const port = this.config.get('CLAMAV_PORT', { infer: true });
 
         await this.ensureHealthy(host, port);
 
