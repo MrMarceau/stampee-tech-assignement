@@ -77,6 +77,11 @@ services:
       - DB_PASSWORD=stampee
       - DB_NAME=stampee
       - DB_SYNC=true
+      - DB_TEST_HOST=mysql
+      - DB_TEST_PORT=3306
+      - DB_TEST_USER=stampee
+      - DB_TEST_PASSWORD=stampee
+      - DB_TEST_NAME=stampee_test
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - SMTP_HOST=maildev

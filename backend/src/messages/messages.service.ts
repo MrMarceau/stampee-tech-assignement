@@ -3,33 +3,38 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
     BadRequestException,
+    GoneException,
     Inject,
     Injectable,
     NotFoundException,
     OnModuleInit,
 } from '@nestjs/common';
+import archiver from 'archiver';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { EnvVars } from '../config/env.js';
-import { Attachment } from './entities/attachment.entity.js';
-import { Message, MessageStatus } from './entities/message.entity.js';
-import { Recipient, RecipientStatus } from './entities/recipient.entity.js';
+import { Attachment } from '../entities/attachment.entity.js';
+import { Message, MessageStatus } from '../entities/message.entity.js';
+import { Recipient, RecipientStatus } from '../entities/recipient.entity.js';
 import { MessageQueueService } from './message-queue.service.js';
 import { CreateMessageDto } from './dto/create-message.schema.js';
+import { AntivirusService } from '../antivirus/antivirus.service.js';
 
 @Injectable()
 export class MessagesService implements OnModuleInit {
     private readonly storageRoot: string;
     private readonly maxFiles: number;
     private readonly maxTotalBytes: number;
+    private readonly downloadTtlHours: number;
 
     constructor(
         @Inject(ConfigService) private readonly config: ConfigService<EnvVars, true>,
         @InjectRepository(Message) private readonly messages: Repository<Message>,
         @InjectRepository(Recipient) private readonly recipients: Repository<Recipient>,
         @InjectRepository(Attachment) private readonly attachments: Repository<Attachment>,
-        private readonly queue: MessageQueueService,
+        @Inject(MessageQueueService) private readonly queue: MessageQueueService,
+        @Inject(AntivirusService) private readonly antivirus: AntivirusService,
     ) {
         if (!this.config) {
             throw new Error('ConfigService not available in MessagesService');
@@ -38,6 +43,7 @@ export class MessagesService implements OnModuleInit {
         this.storageRoot = path.resolve(this.config.get('STORAGE_PATH', { infer: true }));
         this.maxFiles = this.config.get('MAX_FILES_PER_MESSAGE', { infer: true });
         this.maxTotalBytes = this.config.get('MAX_TOTAL_UPLOAD_BYTES', { infer: true });
+        this.downloadTtlHours = this.config.get('DOWNLOAD_TTL_HOURS', { infer: true });
     }
 
     async onModuleInit() {
@@ -61,6 +67,8 @@ export class MessagesService implements OnModuleInit {
                 downloadToken: randomUUID(),
                 status: RecipientStatus.Pending,
                 messageId,
+                expiresAt: this.computeExpiry(),
+                downloadedAt: null,
             }),
         );
 
@@ -102,6 +110,76 @@ export class MessagesService implements OnModuleInit {
         });
     }
 
+    async streamDownload(token: string, res: import('express').Response) {
+        const recipient = await this.recipients.findOne({
+            where: { downloadToken: token },
+        });
+
+        if (!recipient) {
+            throw new NotFoundException('Invalid download token');
+        }
+
+        if (recipient.expiresAt.getTime() < Date.now()) {
+            throw new GoneException('Download link expired');
+        }
+
+        const message = await this.messages.findOne({
+            where: { id: recipient.messageId },
+            relations: ['attachments', 'recipients'],
+        });
+
+        if (!message) {
+            throw new NotFoundException('Message not found');
+        }
+
+        // Ensure all attachments exist on disk before streaming
+        for (const attachment of message.attachments) {
+            try {
+                await fs.access(attachment.path);
+            } catch {
+                throw new NotFoundException('Attachment file not found on disk');
+            }
+        }
+
+        const archive = archiver('zip', { zlib: { level: 9 } });
+        const zipName = `message-${message.id}.zip`;
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
+
+        archive.pipe(res);
+
+        const messageContent = `Subject: ${message.subject}\n\n${message.body}`;
+        archive.append(messageContent, { name: 'message.txt' });
+
+        for (const attachment of message.attachments) {
+            archive.file(attachment.path, { name: attachment.originalName });
+        }
+
+        archive.on('error', (err: Error) => {
+            throw err;
+        });
+
+        await archive.finalize();
+
+        const dataSource = this.messages.manager.connection;
+        if (!dataSource.isInitialized) {
+            return;
+        }
+
+        try {
+            await this.markDownloaded(recipient, message);
+        } catch (error) {
+            // Swallow errors that may happen if the app is shutting down (e.g., tests closing connections)
+            // but log for visibility.
+            const messageText = error instanceof Error ? error.message : String(error);
+            if (messageText.includes('connection is in closed state')) {
+                console.warn('Connection is already closed !');
+                return;
+            }
+            console.error('Failed to mark download as received', error);
+        }
+    }
+
     private enforceLimits(fileCount: number, totalBytes: number) {
         if (fileCount > this.maxFiles) {
             throw new BadRequestException(
@@ -124,6 +202,8 @@ export class MessagesService implements OnModuleInit {
         const attachments: Attachment[] = [];
 
         for (const file of files) {
+            await this.antivirus.scanBuffer(file.buffer);
+
             const storedName = `${Date.now()}-${randomUUID()}${path.extname(file.originalname)}`;
             const fullPath = path.join(targetDir, storedName);
 
@@ -157,5 +237,19 @@ export class MessagesService implements OnModuleInit {
             },
             { count: 0, totalSize: 0 },
         );
+    }
+
+    private computeExpiry() {
+        return new Date(Date.now() + this.downloadTtlHours * 60 * 60 * 1000);
+    }
+
+    private async markDownloaded(recipient: Recipient, message: Message) {
+        recipient.status = RecipientStatus.Downloaded;
+        recipient.downloadedAt = new Date();
+        await this.recipients.save(recipient);
+
+        // Mark message as received when any recipient downloads
+        message.status = MessageStatus.Received;
+        await this.messages.save(message);
     }
 }

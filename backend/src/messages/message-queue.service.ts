@@ -2,15 +2,12 @@ import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Job, Queue, Worker } from 'bullmq';
-import { EnvVars } from '../config/env.js';
-import { Message, MessageStatus } from './entities/message.entity.js';
-import { Recipient, RecipientStatus } from './entities/recipient.entity.js';
-import { MailService } from './mail.service.js';
 import { Repository } from 'typeorm';
-
-type MessageJob = {
-    messageId: string;
-};
+import { EnvVars } from '../config/env.js';
+import { Message, MessageStatus } from '../entities/message.entity.js';
+import { Recipient, RecipientStatus } from '../entities/recipient.entity.js';
+import { MailService } from '../mail/mail.service.js';
+import type { MessageJob } from '../types/message-queue.js';
 
 @Injectable()
 export class MessageQueueService implements OnModuleDestroy {

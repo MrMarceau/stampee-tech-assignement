@@ -16,8 +16,9 @@ export const envSchema = z.object({
     DB_NAME: z.string().default('stampee'),
     DB_SYNC: z
         .enum(['true', 'false'])
-        .default('true')
+        .default('false')
         .transform((value) => value === 'true'),
+    DB_TEST_NAME: z.string().default('stampee_test'),
 
     REDIS_HOST: z.string().default('redis'),
     REDIS_PORT: z.coerce.number().default(6379),
@@ -29,6 +30,8 @@ export const envSchema = z.object({
     DOWNLOAD_TTL_HOURS: z.coerce.number().default(48),
     MAX_FILES_PER_MESSAGE: z.coerce.number().default(10),
     MAX_TOTAL_UPLOAD_BYTES: z.coerce.number().default(256 * 1024 * 1024),
+    RATE_LIMIT_WINDOW_MS: z.coerce.number().default(60_000),
+    RATE_LIMIT_MAX: z.coerce.number().default(100),
 });
 
 export type EnvVars = z.infer<typeof envSchema>;

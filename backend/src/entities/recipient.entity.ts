@@ -33,6 +33,12 @@ export class Recipient {
     @Column({ type: 'enum', enum: RecipientStatus, default: RecipientStatus.Pending })
     status!: RecipientStatus;
 
+    @Column({ type: 'timestamp' })
+    expiresAt!: Date;
+
+    @Column({ type: 'timestamp', nullable: true })
+    downloadedAt!: Date | null;
+
     @CreateDateColumn({ type: 'timestamp' })
     createdAt!: Date;
 }

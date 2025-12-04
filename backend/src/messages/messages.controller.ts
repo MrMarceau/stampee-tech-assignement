@@ -1,4 +1,13 @@
-import { BadRequestException, Body, Controller, Param, Post, UploadedFiles, UseInterceptors } from '@nestjs/common';
+import {
+    BadRequestException,
+    Body,
+    Controller,
+    Inject,
+    Param,
+    Post,
+    UploadedFiles,
+    UseInterceptors,
+} from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import path from 'node:path';
@@ -34,7 +43,7 @@ const fileFilter = (
 
 @Controller('messages')
 export class MessagesController {
-    constructor(private readonly messagesService: MessagesService) {}
+    constructor(@Inject(MessagesService) private readonly messagesService: MessagesService) {}
 
     @Post()
     @UseInterceptors(
@@ -55,7 +64,6 @@ export class MessagesController {
         if (totalSize > MAX_FILE_SIZE) {
             throw new BadRequestException('Total upload size exceeds 256MB');
         }
-
         const message = await this.messagesService.createMessage(payload, files);
         return {
             id: message?.id,
