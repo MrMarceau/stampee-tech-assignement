@@ -190,3 +190,34 @@ The goal is to evaluate:
 If you have any questions about the requirements or need clarification on any aspect of the assessment, please reach out to us. We're here to help ensure you understand what's expected.
 
 Good luck, and we look forward to reviewing your solution!
+
+# Rendu
+
+## Démarrage
+- Prérequis : Docker + Docker Compose. Node 20 / pnpm
+- Copier `backend/.env.example` vers `backend/.env`, copier `frontend/.env.example` vers `frontend/.env`et ajuster si besoin (ce fichier est surtout utile hors Docker, les variables par défaut sont déjà dans `docker-compose.yml`).
+- Installer les dépendances : `pnpm install`.
+- Lancer la stack complète (API Nest, front Next, MySQL, Redis, Maildev, ClamAV, phpMyAdmin) : `docker compose up --build`.
+- Points d’entrée : API http://localhost:3000 (health + routes `/api/messages`, `/api/download/:token`), front http://localhost:3001, Maildev http://localhost:1080, phpMyAdmin http://localhost:8081. En local hors Docker : `pnpm --filter backend dev` et `pnpm --filter frontend dev` (penser à fournir MySQL/Redis/ClamAV).
+
+## Choix d’architecture
+- Monorepo pnpm + docker-compose pour démarrer en quelques commandes avec les mêmes dépendances (API, front, MySQL, Redis, ClamAV, Maildev) sur tous les OS.
+- NestJS + TypeScript pour une structure modulaire (messages, downloads) et des DTO validés avec Zod. TypeORM + MySQL pour le relationnel (messages, destinataires, pièces jointes) avec migrations ; (Prisma était possible, préférence subjective pour TypeORM)
+- Upload pipeline : Multer en mémoire → scan ClamAV → écriture disque → ZIP streaming à la demande (archiver) avec un token de téléchargement unique par destinataire et une expiration configurable.
+- Envoi des emails asynchrone via BullMQ + Redis ; un worker dans le même service distribue les notifications via Nodemailer/Maildev et met à jour les statuts.
+- Protection et perf : rate limiting en middleware, whitelist d’extensions, limite de poids total, déduplication des destinataires, cache Redis pour les snapshots de messages.
+- Front Next.js 14 + Tailwind, stack demandée dans l'exercice et largement adoptée, je crois beaucoup en son potentiel dans l'industrie. Création de message avec pièces jointes, affichage des tokens, polling du statut.
+
+## Limitations et améliorations possibles
+- Authentification/autorisation inexistantes : à ajouter (JWT/OIDC) avec rôles et audit trails. CORS/headers de sécurité à durcir.
+- File storage : passer sur S3/MinIO avec liens signés et cycle de vie, chiffrement au repos et nettoyage des répertoires expirés.
+- File scanning : gérer les pannes ClamAV (circuit breaker, file de quarantaine) et journaliser les signatures.
+- File delivery : séparer le worker BullMQ dans un service dédié, ajouter de l’idempotence et du monitoring (retries, DLQ).
+- Observabilité : métriques/alerting (Prometheus/Grafana).
+- Front : pré-validation des fichiers (type/poids), retours d’erreur plus détaillés, visualisation des téléchargements, tests de composants.
+- Tests : compléter par des tests unitaires (services/worker/mail) et des scénarios de résilience (timeouts SMTP/Redis/MySQL).
+
+## Ressources utilisées
+- Documentation : BullMQ, Nodemailer, Archiver, ClamAV & Redis principalement.
+- Assistants IA : ChatGPT Codex CLI pour du scaffolding côté back et des vérifications ponctuelles, Claude Code pour générer du code côté front
+- Outils : Node.js 20 et pnpm, Docker / Docker Compose, Maildev pour l’email, Redis CLI, mysqlclient/phpMyAdmin pour inspecter la base, Vitest + Supertest pour les tests e2e, ESLint/Prettier pour la qualité du code.

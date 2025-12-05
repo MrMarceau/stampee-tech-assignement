@@ -9,6 +9,7 @@ import { Message } from '../entities/message.entity.js';
 import { Recipient } from '../entities/recipient.entity.js';
 import { MailModule } from '../mail/mail.module.js';
 import { AntivirusModule } from '../antivirus/antivirus.module.js';
+import { CacheService } from '../common/cache.service.js';
 
 @Module({
     imports: [
@@ -18,7 +19,7 @@ import { AntivirusModule } from '../antivirus/antivirus.module.js';
         TypeOrmModule.forFeature([Message, Recipient, Attachment]),
     ],
     controllers: [MessagesController],
-    providers: [MessagesService, MessageQueueService],
+    providers: [MessagesService, MessageQueueService, CacheService],
     exports: [MessagesService],
 })
 export class MessagesModule {}

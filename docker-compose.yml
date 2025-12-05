@@ -105,6 +105,23 @@ services:
     command: pnpm dev
     restart: unless-stopped
 
+  frontend:
+    build:
+      context: .
+      dockerfile: ./frontend/Dockerfile
+    container_name: stampee-frontend
+    environment:
+      - NEXT_PUBLIC_API_BASE_URL=http://localhost:3000/api
+    ports:
+      - "3001:3001"
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app/frontend
+      - /app/node_modules
+    command: pnpm dev:frontend
+    restart: unless-stopped
+
 volumes:
   clamav-data:
   mysql-data:

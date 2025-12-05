@@ -19,7 +19,7 @@ export class MessageQueueService implements OnModuleDestroy {
         @Inject(ConfigService) private readonly config: ConfigService<EnvVars, true>,
         @InjectRepository(Message) private readonly messages: Repository<Message>,
         @InjectRepository(Recipient) private readonly recipients: Repository<Recipient>,
-        private readonly mailer: MailService,
+        @Inject(MailService) private readonly mailer: MailService,
     ) {
         if (!this.config) {
             throw new Error('ConfigService not available in MessageQueueService');
@@ -55,13 +55,19 @@ export class MessageQueueService implements OnModuleDestroy {
             const id = job?.id ?? 'unknown';
             this.logger.error(`Job ${id} failed`, err?.stack);
         });
+
+        this.worker.on('completed', (job) => {
+            const id = job?.id ?? 'unknown';
+            this.logger.log(`Job ${id} completed`);
+        });
     }
 
     async enqueueDispatch(messageId: string) {
         await this.queue.add('dispatch-email', { messageId });
+        this.logger.log(`Queued email dispatch for message ${messageId}`);
     }
 
-    private async processJob(job: Job<MessageJob>) {
+    private processJob = async (job: Job<MessageJob>) => {
         const message = await this.messages.findOne({
             where: { id: job.data.messageId },
             relations: ['recipients', 'attachments'],
@@ -73,6 +79,7 @@ export class MessageQueueService implements OnModuleDestroy {
         }
 
         try {
+            this.logger.log(`Processing email dispatch for message ${message.id}`);
             for (const recipient of message.recipients) {
                 await this.mailer.sendMessageNotification(message, recipient);
                 recipient.status = RecipientStatus.Emailed;
@@ -81,13 +88,16 @@ export class MessageQueueService implements OnModuleDestroy {
 
             message.status = MessageStatus.Sent;
             await this.messages.save(message);
+            this.logger.log(
+                `Message ${message.id} dispatched to ${message.recipients.length} recipient(s)`,
+            );
         } catch (error) {
             message.status = MessageStatus.Failed;
             await this.messages.save(message);
             this.logger.error(`Failed processing message ${message.id}`, (error as Error).stack);
             throw error;
         }
-    }
+    };
 
     async onModuleDestroy() {
         await this.worker.close();

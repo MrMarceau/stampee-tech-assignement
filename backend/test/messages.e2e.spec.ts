@@ -44,6 +44,7 @@ const createTestingApp = async (opts: { antivirusThrows?: boolean } = {}) => {
                         ...config,
                         DB_SYNC: 'true',
                         STORAGE_PATH: storageDir,
+                        CACHE_ENABLED: 'false',
                     }),
             }),
             TypeOrmModule.forRoot({
@@ -258,5 +259,35 @@ describe('Messages e2e', () => {
         expect(response.status).toBe(400);
         expect(response.body.message).toContain('Virus detected :(');
         expect((mockAntivirus?.scanBuffer as ReturnType<typeof vi.fn>)).toHaveBeenCalled();
+    });
+
+    it('returns a message snapshot via GET /api/messages/:id', async () => {
+        const filePath = path.join(storageDir, 'snap.txt');
+        writeFileSync(filePath, 'snapshot');
+
+        const createResponse = await request(app.getHttpServer())
+            .post('/api/messages')
+            .field('subject', 'Snapshot')
+            .field('body', 'Body')
+            .field('recipients', 'user@example.com')
+            .attach('attachments', filePath);
+
+        expect(createResponse.status).toBe(201);
+        const messageId = createResponse.body.id;
+
+        const getResponse = await request(app.getHttpServer()).get(`/api/messages/${messageId}`);
+
+        expect(getResponse.status).toBe(200);
+        expect(getResponse.body.id).toBe(messageId);
+        expect(getResponse.body.subject).toBe('Snapshot');
+        expect(getResponse.body.recipients).toHaveLength(1);
+        expect(getResponse.body.attachments).toHaveLength(1);
+        expect(getResponse.body.recipients[0].status).toBe('pending');
+        expect(getResponse.body.status).toBe('queued');
+    });
+
+    it('returns 404 for GET /api/messages/:id when not found', async () => {
+        const response = await request(app.getHttpServer()).get('/api/messages/non-existent-id');
+        expect(response.status).toBe(404);
     });
 });

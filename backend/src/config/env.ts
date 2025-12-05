@@ -35,6 +35,11 @@ export const envSchema = z.object({
     MAX_TOTAL_UPLOAD_BYTES: z.coerce.number().default(256 * 1024 * 1024),
     RATE_LIMIT_WINDOW_MS: z.coerce.number().default(60_000),
     RATE_LIMIT_MAX: z.coerce.number().default(100),
+    CACHE_ENABLED: z
+        .enum(['true', 'false'])
+        .default('true')
+        .transform((value) => value === 'true'),
+    CACHE_TTL_SECONDS: z.coerce.number().default(60),
 });
 
 export type EnvVars = z.infer<typeof envSchema>;

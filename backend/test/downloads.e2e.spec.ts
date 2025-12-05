@@ -45,6 +45,7 @@ const createTestingApp = async (opts: { antivirusThrows?: boolean } = {}) => {
                         ...config,
                         DB_SYNC: 'true',
                         STORAGE_PATH: storageDir,
+                        CACHE_ENABLED: 'false',
                     }),
             }),
             TypeOrmModule.forRoot({

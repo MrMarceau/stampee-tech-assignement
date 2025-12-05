@@ -6,6 +6,7 @@ import {
     GoneException,
     Inject,
     Injectable,
+    Logger,
     NotFoundException,
     OnModuleInit,
 } from '@nestjs/common';
@@ -20,6 +21,9 @@ import { Recipient, RecipientStatus } from '../entities/recipient.entity.js';
 import { MessageQueueService } from './message-queue.service.js';
 import { CreateMessageDto } from './dto/create-message.schema.js';
 import { AntivirusService } from '../antivirus/antivirus.service.js';
+import { CacheService } from '../common/cache.service.js';
+import type { MessageResponseDto } from './dto/messages.dto.js';
+import type { AttachmentDto } from './dto/attachment.dto.js';
 
 @Injectable()
 export class MessagesService implements OnModuleInit {
@@ -27,6 +31,7 @@ export class MessagesService implements OnModuleInit {
     private readonly maxFiles: number;
     private readonly maxTotalBytes: number;
     private readonly downloadTtlHours: number;
+    private readonly logger = new Logger(MessagesService.name);
 
     constructor(
         @Inject(ConfigService) private readonly config: ConfigService<EnvVars, true>,
@@ -35,6 +40,7 @@ export class MessagesService implements OnModuleInit {
         @InjectRepository(Attachment) private readonly attachments: Repository<Attachment>,
         @Inject(MessageQueueService) private readonly queue: MessageQueueService,
         @Inject(AntivirusService) private readonly antivirus: AntivirusService,
+        @Inject(CacheService) private readonly cache: CacheService,
     ) {
         if (!this.config) {
             throw new Error('ConfigService not available in MessagesService');
@@ -79,14 +85,16 @@ export class MessagesService implements OnModuleInit {
 
         await this.messages.save(message);
         await this.queue.enqueueDispatch(message.id);
+        this.logger.log(
+            `Message created: id=${message.id} recipients=${message.recipients.length} attachments=${message.attachments.length}`,
+        );
 
-        return this.messages.findOne({
-            where: { id: message.id },
-            relations: ['recipients', 'attachments'],
-        });
+        const snapshot = await this.getMessageById(message.id);
+        await this.cache.setJSON(this.cacheKey(message.id), snapshot);
+        return snapshot;
     }
 
-    async addAttachments(messageId: string, files: Express.Multer.File[] = []) {
+    async addAttachments(messageId: string, files: Express.Multer.File[] = []): Promise<AttachmentDto[]> {
         const message = await this.messages.findOne({ where: { id: messageId } });
         if (!message) {
             throw new NotFoundException('Message not found');
@@ -103,11 +111,51 @@ export class MessagesService implements OnModuleInit {
 
         const newAttachments = await this.persistAttachments(targetDir, messageId, files);
         await this.attachments.save(newAttachments);
+        this.logger.log(
+            `Attachments added: messageId=${messageId} added=${newAttachments.length} total=${
+                existingTotals.count + newAttachments.length
+            }`,
+        );
+        await this.cache.del(this.cacheKey(messageId));
 
-        return this.attachments.find({
+        const all = await this.attachments.find({
             where: { messageId },
             order: { createdAt: 'ASC' },
         });
+        return all.map((attachment) => this.toAttachmentDto(attachment));
+    }
+
+    async getMessageById(id: string) {
+        const cached = await this.cache.getJSON<MessageResponseDto>(this.cacheKey(id));
+        if (cached) {
+            return cached;
+        }
+
+        const message = await this.messages.findOne({
+            where: { id },
+            relations: ['recipients', 'attachments'],
+        });
+        if (!message) {
+            throw new NotFoundException('Message not found');
+        }
+
+        const snapshot: MessageResponseDto = {
+            id: message.id,
+            subject: message.subject,
+            body: message.body,
+            status: message.status,
+            createdAt: message.createdAt,
+            recipients: message.recipients.map((recipient) => ({
+                email: recipient.email,
+                status: recipient.status,
+                downloadToken: recipient.downloadToken,
+                expiresAt: recipient.expiresAt,
+                downloadedAt: recipient.downloadedAt,
+            })),
+            attachments: message.attachments.map((attachment) => this.toAttachmentDto(attachment)),
+        };
+        await this.cache.setJSON(this.cacheKey(id), snapshot);
+        return snapshot;
     }
 
     async streamDownload(token: string, res: import('express').Response) {
@@ -169,14 +217,12 @@ export class MessagesService implements OnModuleInit {
         try {
             await this.markDownloaded(recipient, message);
         } catch (error) {
-            // Swallow errors that may happen if the app is shutting down (e.g., tests closing connections)
-            // but log for visibility.
             const messageText = error instanceof Error ? error.message : String(error);
             if (messageText.includes('connection is in closed state')) {
-                console.warn('Connection is already closed !');
+                this.logger.warn('Connection closed while marking download');
                 return;
             }
-            console.error('Failed to mark download as received', error);
+            this.logger.error('Failed to mark download as received', error as Error);
         }
     }
 
@@ -251,5 +297,21 @@ export class MessagesService implements OnModuleInit {
         // Mark message as received when any recipient downloads
         message.status = MessageStatus.Received;
         await this.messages.save(message);
+        this.logger.log(
+            `Download marked: messageId=${message.id} recipient=${recipient.email} status=${recipient.status}`,
+        );
+    }
+
+    private cacheKey(id: string) {
+        return `message:${id}`;
+    }
+
+    private toAttachmentDto(attachment: Attachment): AttachmentDto {
+        return {
+            id: attachment.id,
+            name: attachment.originalName,
+            size: Number(attachment.size),
+            mimeType: attachment.mimeType,
+        };
     }
 }

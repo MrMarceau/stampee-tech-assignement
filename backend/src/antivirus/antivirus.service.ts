@@ -1,6 +1,6 @@
+import clamav from 'clamav.js';
 import { Inject, Injectable, Logger, ServiceUnavailableException, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as clamav from 'clamav.js';
 import { Readable } from 'stream';
 import { EnvVars } from '../config/env.js';
 
@@ -26,14 +26,14 @@ export class AntivirusService {
         const stream = Readable.from(buffer);
 
         return new Promise<void>((resolve, reject) => {
-            scanner.scan(stream, (err: Error | null, object: string) => {
+            scanner.scan(stream, (err: Error | null, _object: unknown, virusName?: string) => {
                 if (err) {
                     this.logger.error(`Scan failed: ${err.message}`);
                     return reject(new ServiceUnavailableException('Virus scan failed'));
                 }
 
-                if (object && object.includes('FOUND')) {
-                    return reject(new BadRequestException('Virus detected in uploaded file'));
+                if (virusName) {
+                    return reject(new BadRequestException(`Virus detected: ${virusName}`));
                 }
 
                 resolve();

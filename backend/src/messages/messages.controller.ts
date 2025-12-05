@@ -2,6 +2,7 @@ import {
     BadRequestException,
     Body,
     Controller,
+    Get,
     Inject,
     Param,
     Post,
@@ -15,6 +16,10 @@ import type { Request } from 'express';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe.js';
 import { createMessageSchema, type CreateMessageDto } from './dto/create-message.schema.js';
 import { MessagesService } from './messages.service.js';
+import type { MessageResponseDto } from './dto/messages.dto.js';
+import type { AttachmentDto } from './dto/attachment.dto.js';
+import type { MessageResponseDto } from './dto/messages.dto.js';
+import type { AttachmentDto } from './dto/attachment.dto.js';
 
 const MAX_FILES = 10;
 const MAX_FILE_SIZE = 256 * 1024 * 1024; // 256MB across the brief; enforced again in service
@@ -45,6 +50,11 @@ const fileFilter = (
 export class MessagesController {
     constructor(@Inject(MessagesService) private readonly messagesService: MessagesService) {}
 
+    @Get(':id')
+    async getById(@Param('id') id: string): Promise<MessageResponseDto> {
+        return this.messagesService.getMessageById(id);
+    }
+
     @Post()
     @UseInterceptors(
         FilesInterceptor('attachments', MAX_FILES, {
@@ -59,29 +69,12 @@ export class MessagesController {
     async create(
         @Body(new ZodValidationPipe(createMessageSchema)) payload: CreateMessageDto,
         @UploadedFiles() files: Express.Multer.File[] = [],
-    ) {
+    ): Promise<MessageResponseDto> {
         const totalSize = files.reduce((acc, file) => acc + file.size, 0);
         if (totalSize > MAX_FILE_SIZE) {
             throw new BadRequestException('Total upload size exceeds 256MB');
         }
-        const message = await this.messagesService.createMessage(payload, files);
-        return {
-            id: message?.id,
-            subject: message?.subject,
-            status: message?.status,
-            recipients: message?.recipients?.map((recipient) => ({
-                email: recipient.email,
-                downloadToken: recipient.downloadToken,
-                status: recipient.status,
-            })),
-            attachments: message?.attachments?.map((attachment) => ({
-                id: attachment.id,
-                name: attachment.originalName,
-                size: Number(attachment.size),
-                mimeType: attachment.mimeType,
-            })),
-            createdAt: message?.createdAt,
-        };
+        return this.messagesService.createMessage(payload, files);
     }
 
     @Post(':id/attachments')
@@ -98,18 +91,12 @@ export class MessagesController {
     async addAttachments(
         @Param('id') id: string,
         @UploadedFiles() files: Express.Multer.File[] = [],
-    ) {
+    ): Promise<AttachmentDto[]> {
         const totalSize = files.reduce((acc, file) => acc + file.size, 0);
         if (totalSize > MAX_FILE_SIZE) {
             throw new BadRequestException('Total upload size exceeds 256MB');
         }
 
-        const attachments = await this.messagesService.addAttachments(id, files);
-        return attachments.map((attachment) => ({
-            id: attachment.id,
-            name: attachment.originalName,
-            size: Number(attachment.size),
-            mimeType: attachment.mimeType,
-        }));
+        return this.messagesService.addAttachments(id, files);
     }
 }
