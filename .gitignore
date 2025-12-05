@@ -24,3 +24,14 @@ uploads
 # Logs
 *.log
 logs
+
+# Next.js / frontend
+.next
+frontend/.next
+out
+frontend/out
+.turbo
+.vercel
+
+# pnpm store (local cache)
+.pnpm-store
